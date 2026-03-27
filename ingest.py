@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import UnstructuredEPubLoader, WebBaseLoader
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -12,6 +12,12 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 DATA_DIR = Path("./data")
 URLS_FILE = DATA_DIR / "urls.txt"
 VECTOR_DB_DIR = "./vector_db"
+DEFAULT_EMBEDDING_MODEL = "models/gemini-embedding-001"
+
+
+def get_embedding_model() -> str:
+    """Resolve embedding model from environment after dotenv has been loaded."""
+    return os.getenv("GEMINI_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
 
 
 def validate_environment() -> str:
@@ -88,8 +94,9 @@ def split_documents(documents: list) -> list:
 
 def build_vector_store(chunks: list) -> None:
     """Create and persist the Chroma vector store."""
-    print("[5/6] Initializing Google embedding model...")
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    embedding_model = get_embedding_model()
+    print(f"[5/6] Initializing Google embedding model: {embedding_model}")
+    embeddings = GoogleGenerativeAIEmbeddings(model=embedding_model)
     print("Embedding model ready.")
 
     print(f"[6/6] Writing vectors to persistent Chroma DB at: {Path(VECTOR_DB_DIR).resolve()}")

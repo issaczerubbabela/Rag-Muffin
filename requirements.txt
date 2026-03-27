@@ -3,9 +3,11 @@ langchain
 langchain-google-genai
 langchain-community
 langchain-chroma
+langchain-text-splitters
 chromadb
 unstructured
 beautifulsoup4
 python-dotenv
 pypdf
 ebooklib
+pypandoc

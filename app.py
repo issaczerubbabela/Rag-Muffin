@@ -3,14 +3,20 @@ from pathlib import Path
 
 import streamlit as st
 from dotenv import load_dotenv
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_classic.chains import create_retrieval_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
 
 VECTOR_DB_DIR = "./vector_db"
+DEFAULT_EMBEDDING_MODEL = "models/gemini-embedding-001"
+
+
+def get_embedding_model() -> str:
+    """Resolve embedding model from environment after dotenv has been loaded."""
+    return os.getenv("GEMINI_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
 
 
 def initialize_components():
@@ -28,7 +34,8 @@ def initialize_components():
             "Run ingest.py first."
         )
 
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    embedding_model = get_embedding_model()
+    embeddings = GoogleGenerativeAIEmbeddings(model=embedding_model)
     vector_store = Chroma(persist_directory=VECTOR_DB_DIR, embedding_function=embeddings)
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
 
