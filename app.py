@@ -12,11 +12,17 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 
 VECTOR_DB_DIR = "./vector_db"
 DEFAULT_EMBEDDING_MODEL = "models/gemini-embedding-001"
+DEFAULT_CHAT_MODEL = "gemini-flash-latest"
 
 
 def get_embedding_model() -> str:
     """Resolve embedding model from environment after dotenv has been loaded."""
     return os.getenv("GEMINI_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
+
+
+def get_chat_model() -> str:
+    """Resolve chat model from environment after dotenv has been loaded."""
+    return os.getenv("GEMINI_CHAT_MODEL", DEFAULT_CHAT_MODEL)
 
 
 def initialize_components():
@@ -39,7 +45,8 @@ def initialize_components():
     vector_store = Chroma(persist_directory=VECTOR_DB_DIR, embedding_function=embeddings)
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
 
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3)
+    chat_model = get_chat_model()
+    llm = ChatGoogleGenerativeAI(model=chat_model, temperature=0.3)
 
     system_prompt = (
         "You are an assistant representing the worldview of the author whose texts "

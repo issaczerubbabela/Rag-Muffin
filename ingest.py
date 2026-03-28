@@ -1,5 +1,7 @@
 import os
+import re
 import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -13,11 +15,32 @@ DATA_DIR = Path("./data")
 URLS_FILE = DATA_DIR / "urls.txt"
 VECTOR_DB_DIR = "./vector_db"
 DEFAULT_EMBEDDING_MODEL = "models/gemini-embedding-001"
+DEFAULT_BATCH_SIZE = 20
+DEFAULT_BATCH_DELAY_SECONDS = 0.75
+DEFAULT_MAX_RETRIES = 8
 
 
 def get_embedding_model() -> str:
     """Resolve embedding model from environment after dotenv has been loaded."""
     return os.getenv("GEMINI_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
+
+
+def _parse_retry_delay_seconds(error_text: str) -> float | None:
+    """Extract retry delay hints from provider error text."""
+    patterns = [
+        r"retry in\s+([0-9]+(?:\.[0-9]+)?)s",
+        r"retryDelay\s*'?:\s*'([0-9]+)s'",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, error_text, flags=re.IGNORECASE)
+        if match:
+            return float(match.group(1))
+    return None
+
+
+def _is_quota_error(error_text: str) -> bool:
+    lowered = error_text.lower()
+    return "resource_exhausted" in lowered or "quota" in lowered or "429" in lowered
 
 
 def validate_environment() -> str:
@@ -95,16 +118,69 @@ def split_documents(documents: list) -> list:
 def build_vector_store(chunks: list) -> None:
     """Create and persist the Chroma vector store."""
     embedding_model = get_embedding_model()
+    batch_size = int(os.getenv("INGEST_BATCH_SIZE", str(DEFAULT_BATCH_SIZE)))
+    batch_delay_seconds = float(
+        os.getenv("INGEST_BATCH_DELAY_SECONDS", str(DEFAULT_BATCH_DELAY_SECONDS))
+    )
+    max_retries = int(os.getenv("INGEST_MAX_RETRIES", str(DEFAULT_MAX_RETRIES)))
+
     print(f"[5/6] Initializing Google embedding model: {embedding_model}")
     embeddings = GoogleGenerativeAIEmbeddings(model=embedding_model)
     print("Embedding model ready.")
 
     print(f"[6/6] Writing vectors to persistent Chroma DB at: {Path(VECTOR_DB_DIR).resolve()}")
-    Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        persist_directory=VECTOR_DB_DIR,
+
+    vector_store = None
+    total_batches = (len(chunks) + batch_size - 1) // batch_size
+    print(
+        f"Embedding {len(chunks)} chunk(s) in {total_batches} batch(es); "
+        f"batch_size={batch_size}, delay={batch_delay_seconds}s"
     )
+
+    for batch_index in range(total_batches):
+        start = batch_index * batch_size
+        end = min(start + batch_size, len(chunks))
+        batch_docs = chunks[start:end]
+        attempt = 0
+
+        while True:
+            try:
+                print(
+                    f"Processing batch {batch_index + 1}/{total_batches} "
+                    f"(chunks {start + 1}-{end})"
+                )
+
+                if vector_store is None:
+                    vector_store = Chroma.from_documents(
+                        documents=batch_docs,
+                        embedding=embeddings,
+                        persist_directory=VECTOR_DB_DIR,
+                    )
+                else:
+                    vector_store.add_documents(batch_docs)
+
+                if batch_index < total_batches - 1 and batch_delay_seconds > 0:
+                    time.sleep(batch_delay_seconds)
+                break
+
+            except Exception as exc:
+                attempt += 1
+                error_text = str(exc)
+                if not _is_quota_error(error_text) or attempt > max_retries:
+                    raise
+
+                retry_after = _parse_retry_delay_seconds(error_text)
+                if retry_after is None:
+                    retry_after = min(60.0, 2.0**attempt)
+
+                wait_seconds = retry_after + 1.0
+                print(
+                    "Quota/rate limit reached while embedding batch "
+                    f"{batch_index + 1}. Retrying in {wait_seconds:.1f}s "
+                    f"(attempt {attempt}/{max_retries})..."
+                )
+                time.sleep(wait_seconds)
+
     print("Vector DB creation completed.")
 
 
